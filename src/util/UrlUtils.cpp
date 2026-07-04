@@ -49,4 +49,20 @@ std::string buildUrl(const std::string& serverUrl, const std::string& path) {
   return base + "/" + path;
 }
 
+std::string urlencode(const std::string& s) {
+  std::string out;
+  out.reserve(s.size());
+  for (unsigned char c : s) {
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+        c == '.' || c == '~') {
+      out.push_back(static_cast<char>(c));
+    } else {
+      char buf[4];
+      std::snprintf(buf, sizeof(buf), "%%%02X", c);
+      out.append(buf, 3);
+    }
+  }
+  return out;
+}
+
 }  // namespace UrlUtils

@@ -187,22 +187,42 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
 }
 
 void ActivityManager::goToFileTransfer(std::string returnBookPath) {
+#ifndef SIMULATOR
   replaceActivity(std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput, std::move(returnBookPath)));
+#else
+  (void)returnBookPath;
+  goHome();
+#endif
 }
 
 void ActivityManager::goToCalibreWireless(std::string returnBookPath) {
+#ifndef SIMULATOR
   replaceActivity(std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput, NetworkMode::CONNECT_CALIBRE,
                                                                 std::move(returnBookPath)));
+#else
+  (void)returnBookPath;
+  goHome();
+#endif
 }
 
 void ActivityManager::goToJoinNetworkFileTransfer(std::string returnBookPath) {
+#ifndef SIMULATOR
   replaceActivity(std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput, NetworkMode::JOIN_NETWORK,
                                                                 std::move(returnBookPath)));
+#else
+  (void)returnBookPath;
+  goHome();
+#endif
 }
 
 void ActivityManager::goToHotspotFileTransfer(std::string returnBookPath) {
+#ifndef SIMULATOR
   replaceActivity(std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput, NetworkMode::CREATE_HOTSPOT,
                                                                 std::move(returnBookPath)));
+#else
+  (void)returnBookPath;
+  goHome();
+#endif
 }
 
 void ActivityManager::goToNearbyStatsSync() {
@@ -265,6 +285,8 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "Settings") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
+    } else if (activityName == "PluginList") {
+      initialMenuItem = HomeMenuItem::PLUGINS;
     }
   }
   replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput, initialMenuItem));

@@ -2424,6 +2424,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               }
             }
           }
+#ifndef SIMULATOR
           if (!fullText.empty()) {
             pauseReadingPaceTimer("qr_display");
             startActivityForResult(
@@ -2431,6 +2432,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                 [this](const ActivityResult& result) { resumeReadingPaceTimer("qr_display_return"); });
             break;
           }
+#endif
         }
       }
       // If no text or page loading failed, just close menu

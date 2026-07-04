@@ -29,12 +29,11 @@ Examples:
     python gen_i18n.py --strip-unused --src-dirs src lib/EpdFont
 """
 
-import sys
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
-
 
 # ---------------------------------------------------------------------------
 # YAML file reading (simple key: "value" format, no PyYAML dependency)
@@ -106,6 +105,42 @@ def parse_yaml_file(filepath: str) -> Dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Bundled-language discovery
+# ---------------------------------------------------------------------------
+
+
+def get_bundled_languages(env=None, default: str = "english") -> Set[str]:
+    """Figure out which languages to include in the firmware.
+
+    First it checks the PlatformIO project option `custom_i18n_bundled` (set
+    in platformio.ini or platformio.local.ini, read via SCons). If that's not
+    set, it tries the `I18N_BUNDLED_LANGUAGES` environment variable. If
+    neither is set, it falls back to the default (usually "english").
+
+    English is always added back to the set, so a misconfigured language list
+    won't leave us without a fallback.
+
+    Returns a lowercase set of file stems (e.g. {"english", "german"}) that
+    match .yaml files in lib/I18n/translations/.
+    """
+    raw: Optional[str] = None
+    if env is not None:
+        try:
+            value = env.GetProjectOption("custom_i18n_bundled", default)
+        except Exception:
+            value = default
+        if value:
+            raw = str(value).strip()
+
+    if raw is None:
+        raw = os.environ.get("I18N_BUNDLED_LANGUAGES", default)
+
+    stems = {s.strip().lower() for s in raw.split(",") if s.strip()}
+    stems.add("english")  # never drop English — runtime fallback language
+    return stems
+
+
+# ---------------------------------------------------------------------------
 # Load all languages from a directory of YAML files
 # ---------------------------------------------------------------------------
 
@@ -113,6 +148,7 @@ def parse_yaml_file(filepath: str) -> Dict[str, str]:
 def load_translations(
     translations_dir: str,
     verbose: bool = False,
+    bundled_filter: Optional[Set[str]] = None,
 ) -> Tuple[List[str], List[str], List[str], Dict[str, List[str]], List[Set[str]]]:
     """
     Read every YAML file in *translations_dir* and return:
@@ -128,6 +164,13 @@ def load_translations(
         raise FileNotFoundError(f"Translations directory not found: {translations_dir}")
 
     yaml_files = sorted(yaml_dir.glob("*.yaml"))
+    if bundled_filter is not None:
+        yaml_files = [yf for yf in yaml_files if yf.stem in bundled_filter]
+        if not yaml_files:
+            raise ValueError(
+                f"bundle filter {sorted(bundled_filter)} matched no *.yaml "
+                f"files in {translations_dir}"
+            )
     if not yaml_files:
         raise FileNotFoundError(f"No .yaml files found in {translations_dir}")
 
@@ -551,19 +594,43 @@ def generate_keys_header(
 
     # V1 language.bin migration table -- frozen enum order from commit 2f969a9.
     # Maps the old uint8_t index stored on disk to the current Language enum.
-    # If a Language enum value listed here is ever removed, this will fail to
-    # compile, signalling that the migration table needs updating.
     v1_codes = [
-        "EN", "ES", "FR", "DE", "CS", "PT", "RU", "SV", "RO", "CA", "UK",
-        "BE", "IT", "PL", "FI", "DA", "NL", "TR", "KK", "HU", "LT", "SI",
+        "EN",
+        "ES",
+        "FR",
+        "DE",
+        "CS",
+        "PT",
+        "RU",
+        "SV",
+        "RO",
+        "CA",
+        "UK",
+        "BE",
+        "IT",
+        "PL",
+        "FI",
+        "DA",
+        "NL",
+        "TR",
+        "KK",
+        "HU",
+        "LT",
+        "SI",
+    ]
+    v1_enums = [
+        f"Language::{c}" if c in languages else "Language::EN" for c in v1_codes
     ]
     lines.append("// V1 language.bin migration table (frozen enum order from 2f969a9)")
-    lines.append("constexpr Language V1_LANGUAGES[] = {")
-    lines.append("    " + ", ".join(f"Language::{c}" for c in v1_codes) + ",")
-    lines.append("};")
+    lines.append("// Codes removed by I18N_BUNDLED_LANGUAGES fall back to EN so legacy")
     lines.append(
-        f"constexpr uint8_t V1_LANGUAGE_COUNT = {len(v1_codes)};"
+        "// `settings.bin` entries with stale indices don't crash a re-flashed"
     )
+    lines.append("// device; their saved language becomes English on load.")
+    lines.append("constexpr Language V1_LANGUAGES[] = {")
+    lines.append("    " + ", ".join(v1_enums) + ",")
+    lines.append("};")
+    lines.append(f"constexpr uint8_t V1_LANGUAGE_COUNT = {len(v1_codes)};")
 
     _write_file(output_path, lines, verbose)
 
@@ -824,6 +891,7 @@ def main(
     src_dirs: Optional[List[str]] = None,
     strip_unused: bool = False,
     verbose: bool = False,
+    bundled_languages: Optional[Set[str]] = None,
 ) -> None:
     # Default paths (relative to project root)
     default_translations_dir = "lib/I18n/translations"
@@ -842,6 +910,9 @@ def main(
     if src_dirs is None:
         src_dirs = default_src_dirs
 
+    if bundled_languages is None:
+        bundled_languages = get_bundled_languages(default="english")
+
     if not os.path.isdir(translations_dir):
         print(f"Error: Translations directory not found: {translations_dir}")
         sys.exit(1)
@@ -857,7 +928,9 @@ def main(
 
     try:
         languages, language_names, string_keys, translations, inherited_sets = (
-            load_translations(translations_dir, verbose)
+            load_translations(
+                translations_dir, verbose, bundled_filter=bundled_languages
+            )
         )
 
         # --- Unused-string detection ---
@@ -886,7 +959,9 @@ def main(
         for i in range(len(languages)):
             if i == 0:
                 data_sizes.append(
-                    sum(len(translations[k][0].encode("utf-8")) + 1 for k in string_keys)
+                    sum(
+                        len(translations[k][0].encode("utf-8")) + 1 for k in string_keys
+                    )
                 )
             else:
                 data_sizes.append(
@@ -997,7 +1072,8 @@ if __name__ == "__main__":
     )
 else:
     try:
-        Import("env")
-        main(strip_unused=True)
+        Import("env")  # noqa: F821  # type: ignore[name-defined]
+        bundled = get_bundled_languages(env, default="english")
+        main(strip_unused=True, bundled_languages=bundled)
     except NameError:
         pass

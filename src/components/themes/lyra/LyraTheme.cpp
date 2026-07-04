@@ -18,7 +18,6 @@
 #include "components/UITheme.h"
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
-#include "components/icons/chart.h"
 #include "components/icons/cover.h"
 #include "components/icons/file24.h"
 #include "components/icons/folder.h"
@@ -26,6 +25,8 @@
 #include "components/icons/hotspot.h"
 #include "components/icons/image24.h"
 #include "components/icons/library.h"
+#include "components/icons/plugins.h"
+#include "components/icons/reading_stats.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
 #include "components/icons/text24.h"
@@ -50,8 +51,6 @@ int centeredRowY(const int rowY, const int rowHeight, const int contentHeight) {
 
 int mainMenuIconYOffset(const UIIcon icon) {
   switch (icon) {
-    case UIIcon::Chart:
-      return -7;
     case UIIcon::Folder:
       return -4;
     case UIIcon::Recent:
@@ -62,6 +61,10 @@ int mainMenuIconYOffset(const UIIcon icon) {
       return -2;
     case UIIcon::Library:
       return -4;
+    case UIIcon::Plugins:
+      return -3;
+    case UIIcon::ReadingStats:
+      return -3;
     default:
       return 0;
   }
@@ -91,8 +94,6 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, uint32_t size) {
         return FolderIcon;
       case UIIcon::Book:
         return BookIcon;
-      case UIIcon::Chart:
-        return ChartIcon;
       case UIIcon::Recent:
         return RecentIcon;
       case UIIcon::Settings:
@@ -105,6 +106,10 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, uint32_t size) {
         return WifiIcon;
       case UIIcon::Hotspot:
         return HotspotIcon;
+      case UIIcon::Plugins:
+        return PluginsIcon;
+      case UIIcon::ReadingStats:
+        return ReadingStatsIcon;
       default:
         return nullptr;
     }

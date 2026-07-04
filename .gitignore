@@ -34,3 +34,8 @@ lib/EpdFont/scripts/output/
 /site/public/images/
 /site/public/catalog
 /site/public/CNAME
+
+# Populated by scripts/update_lua_source.sh (invoked via pre:scripts/fetch_lua.py)
+lib/Lua/src/
+lib/Lua/.VERSION
+lib/Lua/README

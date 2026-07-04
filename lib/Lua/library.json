@@ -1,0 +1,16 @@
+{
+  "name": "Lua",
+  "version": "5.4.7",
+  "description": "PUC-Rio Lua reference distribution (vendored at lib/Lua/src). Stdlib only; the standalone interpreter (lua.c) and bytecode compiler (luac.c) are excluded because both define their own main() and would collide with the Arduino firmware entry point.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "srcFilter": [
+      "+<*>",
+      "-<lua.c>",
+      "-<luac.c>"
+    ]
+  }
+}

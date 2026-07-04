@@ -30,6 +30,7 @@
 #include "RecentBookProgress.h"
 #include "RecentBooksStore.h"
 #include "SavedItemsHomeActivity.h"
+#include "activities/util/PluginListActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/minimal/MinimalTheme.h"
@@ -53,6 +54,7 @@ enum class HomeMenuAction {
   ReadingStats,
   Bookmarks,
   FileTransfer,
+  Plugins,
   Settings,
 };
 
@@ -63,7 +65,7 @@ struct HomeMenuEntry {
 };
 
 struct HomeMenuEntries {
-  static constexpr int kCapacity = 8;
+  static constexpr int kCapacity = 9;
   std::array<HomeMenuEntry, kCapacity> entries{};
   int count = 0;
 
@@ -200,6 +202,40 @@ bool ensureReusableCoverPath(RecentBook& book) {
   return true;
 }
 
+bool homeHasAnyPlugin() {
+  auto dir = Storage.open("/plugins");
+  if (!dir || !dir.isDirectory()) {
+    if (dir) dir.close();
+    return false;
+  }
+  char name[64]{};
+  char path[80]{};  // "/plugins/" + 64-byte name + "/main.lua" + NUL = headroom
+  for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
+    if (!file.isDirectory()) {
+      file.close();
+      continue;
+    }
+    if (!file.getName(name, sizeof(name))) {
+      file.close();
+      continue;
+    }
+    if (name[0] == '.' || name[0] == '_' || name[0] == '\0') {
+      file.close();
+      continue;
+    }
+    std::snprintf(path, sizeof(path), "/plugins/%s/main.lua", name);
+    HalFile probe = Storage.open(path);
+    file.close();
+    if (probe) {
+      probe.close();
+      dir.close();
+      return true;
+    }
+  }
+  dir.close();
+  return false;
+}
+
 const char* savedItemsLabel(bool hasBookmarks, bool hasClippings) {
   if (hasBookmarks && hasClippings) return tr(STR_BOOKMARKS_AND_CLIPPINGS);
   if (hasClippings) return tr(STR_CLIPPINGS);
@@ -207,7 +243,7 @@ const char* savedItemsLabel(bool hasBookmarks, bool hasClippings) {
 }
 
 void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks,
-                         bool hasClippings) {
+                         bool hasClippings, bool hasPlugins) {
   items.push({tr(STR_BROWSE_FILES), Folder, HomeMenuAction::BrowseFiles});
   items.push({tr(STR_MENU_RECENT_BOOKS), Recent, HomeMenuAction::RecentBooks});
 
@@ -215,23 +251,28 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
     items.push({tr(STR_OPDS_BROWSER), Library, HomeMenuAction::OpdsBrowser});
   }
   if (hasReadingStats) {
-    items.push({tr(STR_READING_STATS), Chart, HomeMenuAction::ReadingStats});
+    items.push({tr(STR_READING_STATS), ReadingStats, HomeMenuAction::ReadingStats});
   }
   if (hasBookmarks || hasClippings) {
     items.push({savedItemsLabel(hasBookmarks, hasClippings), BookmarkIcon, HomeMenuAction::Bookmarks});
   }
 
   items.push({tr(STR_FILE_TRANSFER), Transfer, HomeMenuAction::FileTransfer});
+  if (hasPlugins) {
+    items.push({tr(STR_PLUGINS), Plugins, HomeMenuAction::Plugins});
+  }
   items.push({tr(STR_SETTINGS_TITLE), Settings, HomeMenuAction::Settings});
 }
 
-HomeMenuEntries buildHomeMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks, bool hasClippings) {
+HomeMenuEntries buildHomeMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks, bool hasClippings,
+                                   bool hasPlugins) {
   HomeMenuEntries items;
-  appendHomeMenuItems(items, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings);
+  appendHomeMenuItems(items, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, hasPlugins);
   return items;
 }
 
-HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks, bool hasClippings) {
+HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks, bool hasClippings,
+                                      bool hasPlugins) {
   HomeMenuEntries items;
   items.push({tr(STR_MENU_RECENT_BOOKS), Recent, HomeMenuAction::RecentBooks});
 
@@ -242,7 +283,10 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
     items.push({savedItemsLabel(hasBookmarks, hasClippings), BookmarkIcon, HomeMenuAction::Bookmarks});
   }
   if (hasReadingStats) {
-    items.push({tr(STR_READING_STATS), Chart, HomeMenuAction::ReadingStats});
+    items.push({tr(STR_READING_STATS), ReadingStats, HomeMenuAction::ReadingStats});
+  }
+  if (hasPlugins) {
+    items.push({tr(STR_PLUGINS), Plugins, HomeMenuAction::Plugins});
   }
 
   items.push({tr(STR_FILE_TRANSFER), Transfer, HomeMenuAction::FileTransfer});
@@ -250,12 +294,12 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
 }
 
 HomeMenuEntries buildSelectableHomeMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks,
-                                             bool hasClippings, bool includeContinueReading) {
+                                             bool hasClippings, bool includeContinueReading, bool hasPlugins) {
   HomeMenuEntries items;
   if (includeContinueReading) {
     items.push({tr(STR_CONTINUE_READING), Book, HomeMenuAction::ContinueReading});
   }
-  appendHomeMenuItems(items, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings);
+  appendHomeMenuItems(items, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, hasPlugins);
   return items;
 }
 
@@ -274,6 +318,8 @@ HomeMenuAction homeActionForInitialMenuItem(HomeMenuItem item) {
     case HomeMenuItem::NONE:
     default:
       return HomeMenuAction::ContinueReading;
+    case HomeMenuItem::PLUGINS:
+      return HomeMenuAction::Plugins;
   }
 }
 
@@ -385,7 +431,7 @@ void appendSyncedStatsStateToKey(std::string& key) {
 }
 
 void appendCarouselMenuStateToKey(std::string& key, const bool hasOpdsServers, const bool hasReadingStats,
-                                  const bool hasBookmarks, const bool hasClippings) {
+                                  const bool hasBookmarks, const bool hasClippings, const bool hasPlugins) {
   key += hasOpdsServers ? "opds:1" : "opds:0";
   key += '\0';
   key += hasReadingStats ? "stats:1" : "stats:0";
@@ -394,16 +440,18 @@ void appendCarouselMenuStateToKey(std::string& key, const bool hasOpdsServers, c
   key += '\0';
   key += hasClippings ? "clippings:1" : "clippings:0";
   key += '\0';
+  key += hasPlugins ? "plugins:1" : "plugins:0";
+  key += '\0';
 }
 
 void buildCarouselCacheKey(const std::vector<RecentBook>& recentBooks, const bool hasOpdsServers,
                            const bool hasReadingStats, const bool hasBookmarks, const bool hasClippings,
-                           std::string& key, uint64_t& keyHash) {
+                           const bool hasPlugins, std::string& key, uint64_t& keyHash) {
   key.clear();
   key.reserve(512);
   // The carousel cache stores the bottom icon row too, so menu visibility must
   // be part of the key alongside book covers/progress.
-  appendCarouselMenuStateToKey(key, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings);
+  appendCarouselMenuStateToKey(key, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, hasPlugins);
   for (const auto& book : recentBooks) {
     appendCarouselCoverStateToKey(key, book);
   }
@@ -433,13 +481,13 @@ bool readCarouselCacheHeader(FsFile& file, CarouselCacheHeader& header) {
 
 bool hasValidCarouselDiskCache(const std::vector<RecentBook>& recentBooks, const GfxRenderer& renderer,
                                const bool hasOpdsServers, const bool hasReadingStats, const bool hasBookmarks,
-                               const bool hasClippings) {
+                               const bool hasClippings, const bool hasPlugins) {
   const int bookCount = static_cast<int>(recentBooks.size());
   if (bookCount <= 0) return false;
 
   std::string cacheKey;
   uint64_t cacheKeyHash = 0;
-  buildCarouselCacheKey(recentBooks, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, cacheKey,
+  buildCarouselCacheKey(recentBooks, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, hasPlugins, cacheKey,
                         cacheKeyHash);
 
   FsFile cacheFile;
@@ -522,6 +570,9 @@ int HomeActivity::getMenuItemCount() const {
     count++;
   }
   if (hasBookmarks || hasClippings) {
+    count++;
+  }
+  if (hasPlugins) {
     count++;
   }
   return count;
@@ -765,6 +816,7 @@ void HomeActivity::onEnter() {
   // Check if any books have bookmarks (directory scan only, no file parsing)
   hasBookmarks = BookmarkStore::hasAnyBookmarks();
   hasClippings = ClippingStore::hasAnyClippings();
+  hasPlugins = homeHasAnyPlugin();
 
   selectorIndex = 0;
   lastCarouselBookIndex = 0;
@@ -807,7 +859,7 @@ void HomeActivity::onEnter() {
   if (initialMenuItem != HomeMenuItem::NONE) {
     const bool includeContinueReading = metrics.homeContinueReadingInMenu && !recentBooks.empty();
     const auto menuItems = buildSelectableHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings,
-                                                        includeContinueReading);
+                                                        includeContinueReading, hasPlugins);
     const int menuIndex = findMenuActionIndex(menuItems, homeActionForInitialMenuItem(initialMenuItem));
     if (menuIndex >= 0) {
       selectorIndex = getHomeMenuSelectionOffset(recentBooks) + menuIndex;
@@ -815,8 +867,8 @@ void HomeActivity::onEnter() {
     }
   }
 
-  if (isCarouselTheme &&
-      hasValidCarouselDiskCache(recentBooks, renderer, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings)) {
+  if (isCarouselTheme && hasValidCarouselDiskCache(recentBooks, renderer, hasOpdsServers, hasReadingStats, hasBookmarks,
+                                                   hasClippings, hasPlugins)) {
     preRenderCarouselFrames(false);
   }
 
@@ -1014,7 +1066,7 @@ void HomeActivity::renderCarouselFrameToCurrentBuffer(int bookIdx, BookReadingSt
 
   const bool frameHasReadingStats = hasAnyBookStats(frameStats) || hasAnyGlobalStats(globalStats) ||
                                     (showAllDevicesStats && hasAnyGlobalStats(allDevicesGlobalStats));
-  const auto menuItems = buildHomeMenuItems(hasOpdsServers, frameHasReadingStats, hasBookmarks, hasClippings);
+  const auto menuItems = buildHomeMenuItems(hasOpdsServers, frameHasReadingStats, hasBookmarks, hasClippings, hasPlugins);
   GUI.drawButtonMenu(
       renderer,
       Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing, pageWidth,
@@ -1200,7 +1252,8 @@ bool HomeActivity::preRenderCarouselFrames(bool showProgressPopup) {
   // reuse a stale snapshot built before carousel-sized thumbs existed.
   std::string newKey;
   uint64_t newKeyHash = 0;
-  buildCarouselCacheKey(recentBooks, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, newKey, newKeyHash);
+  buildCarouselCacheKey(recentBooks, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, hasPlugins, newKey,
+                        newKeyHash);
 
   // Cache hit: same books in same order — reuse without any SD reads
   if (newKey == gCarouselCache.key && gCarouselCache.frameCount > 0) {
@@ -1299,7 +1352,7 @@ void HomeActivity::loop() {
     }
 
     if (minimalMenuOpen) {
-      const auto menuItems = buildMinimalMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings);
+      const auto menuItems = buildMinimalMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, hasPlugins);
       const int menuCount = static_cast<int>(menuItems.size());
       if (menuCount <= 0) {
         minimalMenuOpen = false;
@@ -1345,6 +1398,9 @@ void HomeActivity::loop() {
             break;
           case HomeMenuAction::FileTransfer:
             onFileTransferOpen();
+            break;
+          case HomeMenuAction::Plugins:
+            onPluginsOpen();
             break;
           case HomeMenuAction::ContinueReading:
           case HomeMenuAction::Settings:
@@ -1450,7 +1506,7 @@ void HomeActivity::loop() {
   if (isCarousel) {
     const int bookCount = visibleBookCount;
     const int menuItemCount =
-        static_cast<int>(buildHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings).size());
+        static_cast<int>(buildHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, hasPlugins).size());
     const bool inCarouselRow = (selectorIndex < bookCount);
     const int menuIdx = inCarouselRow ? 0 : (selectorIndex - bookCount);
 
@@ -1510,7 +1566,7 @@ void HomeActivity::loop() {
     }
 
     auto menuItems = buildSelectableHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings,
-                                                  metrics.homeContinueReadingInMenu && !recentBooks.empty());
+                                                  metrics.homeContinueReadingInMenu && !recentBooks.empty(), hasPlugins);
     const int menuSelectedIndex = selectorIndex - getHomeMenuSelectionOffset(recentBooks);
     if (menuSelectedIndex < 0 || menuSelectedIndex >= static_cast<int>(menuItems.size())) {
       return;
@@ -1538,6 +1594,9 @@ void HomeActivity::loop() {
       case HomeMenuAction::FileTransfer:
         onFileTransferOpen();
         break;
+      case HomeMenuAction::Plugins:
+        onPluginsOpen();
+        break;
       case HomeMenuAction::Settings:
         onSettingsOpen();
         break;
@@ -1555,7 +1614,7 @@ void HomeActivity::render(RenderLock&&) {
 
     if (minimalMenuOpen) {
       GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding}, nullptr);
-      const auto menuItems = buildMinimalMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings);
+      const auto menuItems = buildMinimalMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, hasPlugins);
       GUI.drawButtonMenu(
           renderer, Rect{0, metrics.homeTopPadding, pageWidth, pageHeight - metrics.homeTopPadding},
           static_cast<int>(menuItems.size()), minimalMenuIndex,
@@ -1623,7 +1682,8 @@ void HomeActivity::render(RenderLock&&) {
       GUI.drawCarouselBorder(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
                              recentBooks, centerIdx, inCarouselRow);
       if (!inCarouselRow) {
-        const auto menuItems = buildHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings);
+        const auto menuItems =
+            buildHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, hasPlugins);
         if (static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) ==
             CrossPointSettings::UI_THEME::LYRA_CAROUSEL) {
           static_cast<const LyraCarouselTheme&>(GUI).drawButtonMenuSelectionOverlay(
@@ -1669,7 +1729,7 @@ void HomeActivity::render(RenderLock&&) {
                           hasAnyBookStats(currentBookStats) ? &currentBookStats : nullptr, currentBookProgressPercent);
 
   auto menuItems = buildSelectableHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings,
-                                                metrics.homeContinueReadingInMenu && !recentBooks.empty());
+                                                metrics.homeContinueReadingInMenu && !recentBooks.empty(), hasPlugins);
 
   const int menuStartY = metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset;
   const int menuEndY = pageHeight - metrics.buttonHintsHeight;
@@ -1744,6 +1804,10 @@ void HomeActivity::onSelectBook(const std::string& path) {
 }
 
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
+
+void HomeActivity::onPluginsOpen() {
+  activityManager.replaceActivity(std::make_unique<PluginListActivity>(renderer, mappedInput));
+}
 
 void HomeActivity::onContinueReading() {
   if (!recentBooks.empty()) {

@@ -25,4 +25,14 @@ std::string extractHost(const std::string& url);
  */
 std::string buildUrl(const std::string& serverUrl, const std::string& path);
 
+/**
+ * RFC 3986 percent-encode for URL components (unreserved-safe: A-Z / a-z /
+ * 0-9 / `-` / `_` / `.` / `~` pass through unchanged; everything else becomes
+ * `%XX`).
+ *
+ * Callers MUST still escape structural characters (`&`, `=`, `#`, `?`) manually
+ * when building query strings.
+ */
+std::string urlencode(const std::string& s);
+
 }  // namespace UrlUtils
